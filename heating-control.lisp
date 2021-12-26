@@ -129,7 +129,7 @@ exec sbcl --script "$0" "$@"
 	   (setf *heating-paused* nil)
 	   (setf *curr-fn* #'idle))
 	  (t (let ((ts (get-universal-time)))
-	       (when (> ts (+ *heating-paused-at* *heating-duration*))
+	       (when (> ts (+ *heating-paused-at* *heating-pause-duration*))
 		 (heating :on)
 		 (print-now :heating-on)
 		 (setf *heating-resumed-at* ts)
