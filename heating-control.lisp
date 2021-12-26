@@ -21,37 +21,41 @@ exec sbcl --script "$0" "$@"
 
 (use-package '(:parse-float :sqlite))
 
-(defvar *cmd* (make-hash-table))
+(defmacro str+ (&rest rest) `(concatenate 'string ,@rest))
 
+(defparameter *path* (str+ (uiop:getenv :home) "/projects/heating-control/"))
+
+(defvar *cmd* (make-hash-table))
 (setf (gethash :temperature *cmd*)
-      '("/usr/bin/python3" "/home/pi/projects/heating-control/temperature.py"))
+      '("/usr/bin/python3" (str+ *path* "temperature.py")))
 (setf (gethash :toggle *cmd*)
       '("/usr/bin/curl" "http://192.168.178.63/r1"))
 (setf (gethash :state *cmd*)
       '("/usr/bin/curl" "http://192.168.178.63/?"))
 
-(defvar *min-temp* 10)
-(defvar *max-temp* 11.2)
+(defparameter *min-temp* 10)
+(defparameter *max-temp* 11.2)
 
-(defvar *forever* t)
-(defvar *heating-needed*)
-(defvar *heating-started*)
-(defvar *heating-paused*)
+(defparameter *forever* t)
+(defparameter *heating-needed*)
+(defparameter *heating-started*)
+(defparameter *heating-paused*)
 
-(defvar *idle-at*)
-(defvar *heating-resumed-at*)
-(defvar *heating-paused-at*)
+(defparameter *idle-at*)
+(defparameter *heating-resumed-at*)
+(defparameter *heating-paused-at*)
 
-(defvar *idle-duration* (* 10 60))
-(defvar *heating-duration* (* 5 60))
-(defvar *heating-pause-duration* (* 5 60))
+(defparameter *idle-duration* (* 10 60))
+(defparameter *heating-duration* (* 5 60))
+(defparameter *heating-pause-duration* (* 5 60))
 
-(defvar *curr-fn*)
+(defparameter *curr-fn*)
 
-(defvar *temperature* nil)
-(defvar *humidity* nil)
+(defparameter *temperature* nil)
+(defparameter *humidity* nil)
 
-(defvar *db* (connect #p"/home/pi/projects/heating-control/data/heating.db"))
+(defparameter *db*
+  (connect (merge-pathnames #p"data/heating.db" *path*)))
 (defvar *db-create* '(execute-non-query *db*
 		      "create table heating (id integer primary key, 
                                           ts text not null, 
@@ -59,7 +63,7 @@ exec sbcl --script "$0" "$@"
                                           hum float null
                                           state text null)"))
 
-(defvar *slynk-port* 4006)
+(defparameter *slynk-port* 4006)
 
 (slynk:create-server :port *slynk-port*  :dont-close t)
 (setf slynk:*use-dedicated-output-stream* nil) 
