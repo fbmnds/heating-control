@@ -4,6 +4,7 @@ exec sbcl --script "$0" "$@"
 |#
 
 
+;;#-quicklisp
 #-quicklisp
 (let ((quicklisp-init (merge-pathnames "quicklisp/setup.lisp"
                                        (user-homedir-pathname))))
@@ -37,19 +38,19 @@ exec sbcl --script "$0" "$@"
 (defparameter *max-temp* 11.2)
 
 (defparameter *forever* t)
-(defparameter *heating-needed*)
-(defparameter *heating-started*)
-(defparameter *heating-paused*)
+(defvar *heating-needed*)
+(defvar *heating-started*)
+(defvar *heating-paused*)
 
-(defparameter *idle-at*)
-(defparameter *heating-resumed-at*)
-(defparameter *heating-paused-at*)
+(defvar *idle-at*)
+(defvar *heating-resumed-at*)
+(defvar *heating-paused-at*)
 
 (defparameter *idle-duration* (* 10 60))
 (defparameter *heating-duration* (* 5 60))
 (defparameter *heating-pause-duration* (* 5 60))
 
-(defparameter *curr-fn*)
+(defvar *curr-fn*)
 
 (defparameter *temperature* nil)
 (defparameter *humidity* nil)
