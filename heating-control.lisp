@@ -28,7 +28,7 @@ exec sbcl --script "$0" "$@"
 
 (defvar *cmd* (make-hash-table))
 (setf (gethash :temperature *cmd*)
-      '("/usr/bin/python3" (str+ *path* "temperature.py")))
+      (list "/usr/bin/python3" (str+ *path* "temperature.py")))
 (setf (gethash :toggle *cmd*)
       '("/usr/bin/curl" "http://192.168.178.63/r1"))
 (setf (gethash :state *cmd*)
@@ -64,9 +64,9 @@ exec sbcl --script "$0" "$@"
                                           hum float null
                                           state text null)"))
 
-(defparameter *slynk-port* 4006)
+;;(defparameter *slynk-port* 4006)
 
-(slynk:create-server :port *slynk-port*  :dont-close t)
+;;(slynk:create-server :port *slynk-port*  :dont-close t)
 (setf slynk:*use-dedicated-output-stream* nil) 
 
 (defun print-now (kw)
