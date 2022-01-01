@@ -38,13 +38,13 @@ exec sbcl --script "$0" "$@"
 (defparameter *max-temp* 11.2)
 
 (defparameter *forever* t)
-(defvar *heating-needed*)
-(defvar *heating-started*)
-(defvar *heating-paused*)
+(defparameter *heating-needed* nil)
+(defparameter *heating-started* nil)
+(defparameter *heating-paused* nil)
 
-(defvar *idle-at*)
-(defvar *heating-resumed-at*)
-(defvar *heating-paused-at*)
+(defparameter *idle-at* nil)
+(defparameter *heating-resumed-at* nil)
+(defparameter *heating-paused-at* nil)
 
 (defparameter *idle-duration* (* 10 60))
 (defparameter *heating-duration* (* 5 60))
