@@ -30,9 +30,9 @@ exec sbcl --script "$0" "$@"
 (setf (gethash :temperature *cmd*)
       (list "/usr/bin/python3" (str+ *path* "temperature.py")))
 (setf (gethash :toggle *cmd*)
-      '("/usr/bin/curl" "http://192.168.178.63/r1"))
+      '("/usr/bin/curl" "http://192.168.178.70/r1"))
 (setf (gethash :state *cmd*)
-      '("/usr/bin/curl" "http://192.168.178.63/?"))
+      '("/usr/bin/curl" "http://192.168.178.70/?"))
 
 (defparameter *min-temp* 10)
 (defparameter *max-temp* 11.2)
