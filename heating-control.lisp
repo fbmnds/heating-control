@@ -26,6 +26,16 @@ exec sbcl --script "$0" "$@"
 
 (defparameter *path* (str+ (uiop:getenv :home) "/projects/heating-control/"))
 
+(defparameter *heating-gpio-pin* 21)
+(defparameter *cmd-on*
+  (format nil
+          "/usr/bin/echo 1 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
+(defparameter *cmd-off*
+  (format nil
+          "/usr/bin/echo 0 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
+(defparameter *cmd-state*
+  (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
+
 (defvar *cmd* (make-hash-table))
 (setf (gethash :temperature *cmd*)
       (list "/usr/bin/python3" (str+ *path* "temperature.py")))
@@ -95,7 +105,7 @@ exec sbcl --script "$0" "$@"
     (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t))))
   (values *temperature* *humidity*))
 
-(defun heating-op (op)
+(defun heating-op-old (op)
   (flet ((cmd () (uiop:run-program
 		  (gethash op *cmd*)
 		  :output '(:string :stripped t))))
@@ -104,13 +114,28 @@ exec sbcl --script "$0" "$@"
 		 (with-input-from-string (s (cmd))
 		   (json:decode-json s)))))))
 
+
+(defun heating-op (op)
+  (ignore-errors
+    (case op
+          (:on (uiop:run-program *cmd-on*)
+               (sleep 1)
+               (heating-op :state))
+          (:off (uiop:run-program *cmd-off*)
+                (sleep 1)
+                (heating-op :state))
+          (:state (parse-integer
+                   (uiop:run-program *cmd-state*
+                                     :output '(:string :stripped t))
+                   :junk-allowed t)))))
+
 (defun heating (mode)
   (let ((state (heating-op :state)))
     (case mode
       (:on (when (and state (= 0 state))
-	     (setf state (heating-op :toggle))))
+	     (setf state (heating-op :on))))
       (:off (when (and state (= 1 state))
-	      (setf state (heating-op :toggle))))
+	      (setf state (heating-op :off))))
       (otherwise state))
     (case state
       (0 :off)
