@@ -36,13 +36,7 @@ exec sbcl --script "$0" "$@"
 (defparameter *cmd-state*
   (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
 
-(defvar *cmd* (make-hash-table))
-(setf (gethash :temperature *cmd*)
-      (list "/usr/bin/python3" (str+ *path* "temperature.py")))
-(setf (gethash :toggle *cmd*)
-      '("/usr/bin/curl" "http://192.168.178.70/r1"))
-(setf (gethash :state *cmd*)
-      '("/usr/bin/curl" "http://192.168.178.70/?"))
+(defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))
 
 (defparameter *min-temp* 10)
 (defparameter *max-temp* 11.2)
@@ -74,10 +68,9 @@ exec sbcl --script "$0" "$@"
                                           hum float null
                                           state text null)"))
 
-;;(defparameter *slynk-port* 4006)
-
-;;(slynk:create-server :port *slynk-port*  :dont-close t)
-(setf slynk:*use-dedicated-output-stream* nil) 
+(defparameter *slynk-port* 4006)
+(slynk:create-server :port *slynk-port*  :dont-close t)
+;;(setf slynk:*use-dedicated-output-stream* nil) 
 
 (defun print-now (kw)
   (let* ((ts (format nil "~a"
@@ -98,22 +91,12 @@ exec sbcl --script "$0" "$@"
 
 (defun fetch-temperature ()
   (let ((th (ignore-errors
-	     (uiop:split-string (uiop:run-program (gethash :temperature *cmd*)
+	     (uiop:split-string (uiop:run-program *cmd-th* 
 						  :output '(:string :stripped t))
 				:separator " "))))
     (setf *temperature* (round-2 (parse-float (car th) :junk-allowed t)))
     (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t))))
   (values *temperature* *humidity*))
-
-(defun heating-op-old (op)
-  (flet ((cmd () (uiop:run-program
-		  (gethash op *cmd*)
-		  :output '(:string :stripped t))))
-    (ignore-errors
-     (cdr (assoc :r-1
-		 (with-input-from-string (s (cmd))
-		   (json:decode-json s)))))))
-
 
 (defun heating-op (op)
   (ignore-errors
