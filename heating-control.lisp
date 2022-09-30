@@ -26,6 +26,7 @@ exec sbcl --script "$0" "$@"
 (defmacro str+ (&rest rest) `(concatenate 'string ,@rest))
 
 (defparameter *path* (str+ (uiop:getenv :home) "/projects/heating-control/"))
+(load (str+ *path* "secrets/secrets.lisp"))
 
 (defparameter *heating-gpio-pin* 21)
 (defparameter *cmd-on*
@@ -221,7 +222,7 @@ exec sbcl --script "$0" "$@"
     (funcall *curr-fn*)
     (chat-now (ts-info (function-name *curr-fn*)))
     (sleep 60))
-  (chat (ts-info )))
+  (chat (ts-info :stop)))
 
 (defun run-control-heating ()
   (bt:make-thread #'control-heating))
