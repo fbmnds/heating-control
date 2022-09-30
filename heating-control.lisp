@@ -18,6 +18,7 @@ exec sbcl --script "$0" "$@"
 (ql:quickload :bt-semaphore)
 (ql:quickload :local-time)
 (ql:quickload :sqlite)
+(ql:quickload :named-readtables)
 (ql:quickload :slynk)
 
 (use-package '(:parse-float :sqlite))
@@ -81,9 +82,9 @@ exec sbcl --script "$0" "$@"
 		     :format '(:year "-" (:month 2) "-" (:day 2) " "
 			       (:hour 2) ":" (:min 2) ":" (:sec 2))))))
     (values
-     ts
      (format nil
-	     "~%~a ~a*C ~a% ~a" ts *temperature* *humidity* kw))))
+	     "~%~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)
+     ts)))
 
 (defun chat (text)
   (dex:request (format nil
@@ -98,13 +99,10 @@ exec sbcl --script "$0" "$@"
     (unless *state-at* (setf *state-at* ts))
     (when (> ts (+ *state-at* *state-duration*))
       (setf *state-at* ts)
-      (multiple-value-bind (_ ts-info)
-          (ts-info fn)
-        (declare (ignore _))
-        (chat ts-info)))))
+      (chat (ts-info fn)))))
 
 (defun print-now (kw)
-  (multiple-value-bind (ts ts-info)
+  (multiple-value-bind (ts-info ts)
       (ts-info kw)
     (ignore-errors
      (execute-non-query
@@ -221,11 +219,9 @@ exec sbcl --script "$0" "$@"
   (fetch-temperature)
   (while *forever*
     (funcall *curr-fn*)
-    (multiple-value-bind (_ ts-info)
-        (ts-info (function-name *curr-fn*))
-      (declare (ignore _))
-      (chat-now ts-info))
-    (sleep 60)))
+    (chat-now (ts-info (function-name *curr-fn*)))
+    (sleep 60))
+  (chat (ts-info )))
 
 (defun run-control-heating ()
   (bt:make-thread #'control-heating))
