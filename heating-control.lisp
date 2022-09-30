@@ -11,7 +11,7 @@ exec sbcl --script "$0" "$@"
   (when (probe-file quicklisp-init)
     (load quicklisp-init)))
 
-;;(ql:quickload :dexador)
+(ql:quickload :dexador)
 (ql:quickload :uiop)
 (ql:quickload :parse-float)
 (ql:quickload :cl-json)
@@ -49,10 +49,12 @@ exec sbcl --script "$0" "$@"
 (defparameter *idle-at* nil)
 (defparameter *heating-resumed-at* nil)
 (defparameter *heating-paused-at* nil)
+(defparameter *state-at* nil)
 
 (defparameter *idle-duration* (* 10 60))
 (defparameter *heating-duration* (* 5 60))
 (defparameter *heating-pause-duration* (* 5 60))
+(defparameter *state-duration* (* 6 60 60))
 
 (defvar *curr-fn*)
 
@@ -72,20 +74,45 @@ exec sbcl --script "$0" "$@"
 (slynk:create-server :port *slynk-port*  :dont-close t)
 ;;(setf slynk:*use-dedicated-output-stream* nil) 
 
+(defun ts-info (kw)
+  (let ((ts (format nil "~a"
+		    (local-time:format-timestring
+		     nil (local-time:now)
+		     :format '(:year "-" (:month 2) "-" (:day 2) " "
+			       (:hour 2) ":" (:min 2) ":" (:sec 2))))))
+    (values
+     ts
+     (format nil
+	     "~%~a ~a*C ~a% ~a" ts *temperature* *humidity* kw))))
+
+(defun chat (text)
+  (dex:request (format nil
+                       "https://api.telegram.org/bot~a/sendMessage?chat_id=~a"
+                       *bot-token* *chat-id*)
+               :method :post
+               :headers '(("Content-Type" . "application/json"))
+               :content (format nil "{\"text\": \"~a\"}" text)))
+
+(defun chat-now (fn)
+  (let ((ts (get-universal-time)))
+    (unless *state-at* (setf *state-at* ts))
+    (when (> ts (+ *state-at* *state-duration*))
+      (setf *state-at* ts)
+      (multiple-value-bind (_ ts-info)
+          (ts-info fn)
+        (declare (ignore _))
+        (chat ts-info)))))
+
 (defun print-now (kw)
-  (let* ((ts (format nil "~a"
-		     (local-time:format-timestring
-		      nil (local-time:now)
-		      :format '(:year "-" (:month 2) "-" (:day 2) " "
-				(:hour 2) ":" (:min 2) ":" (:sec 2)))))
-	 (ts-info (format nil
-			  "~%~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)))
+  (multiple-value-bind (ts ts-info)
+      (ts-info kw)
     (ignore-errors
      (execute-non-query
       *db* (concatenate 'string "insert into heating (ts,temp,hum,state)"
-                                " values (?,round(?,2),round(?,2),?)")
+                        " values (?,round(?,2),round(?,2),?)")
       ts *temperature* *humidity* (format nil "~a" kw)))
-    (princ ts-info)))
+    (princ ts-info)
+    (unless (eql kw :idle) (chat ts-info))))
 
 (defun round-2 (x) (when (numberp x) (float (/ (round (* 100 x)) 100))))
 
@@ -99,18 +126,22 @@ exec sbcl --script "$0" "$@"
   (values *temperature* *humidity*))
 
 (defun heating-op (op)
-  (ignore-errors
-    (case op
-          (:on (uiop:run-program *cmd-on*)
-               (sleep 1)
-               (heating-op :state))
-          (:off (uiop:run-program *cmd-off*)
-                (sleep 1)
-                (heating-op :state))
-          (:state (parse-integer
-                   (uiop:run-program *cmd-state*
-                                     :output '(:string :stripped t))
-                   :junk-allowed t)))))
+  (unless
+      (ignore-errors
+       (case op
+         (:on
+          (uiop:run-program *cmd-on*)
+          (sleep 1)
+          (heating-op :state))
+         (:off
+          (uiop:run-program *cmd-off*)
+          (sleep 1)
+          (heating-op :state))
+         (:state
+          (parse-integer
+           (uiop:run-program *cmd-state*
+                             :output '(:string :stripped t)) :junk-allowed t))))
+    (chat (format nil "Heating ~a failed." :op))))
 
 (defun heating (mode)
   (let ((state (heating-op :state)))
@@ -188,7 +219,13 @@ exec sbcl --script "$0" "$@"
   (setf *curr-fn* #'idle)
   (setf *idle-at* (- (get-universal-time) (* 20 60)))
   (fetch-temperature)
-  (while *forever* (funcall *curr-fn*) (sleep 60)))
+  (while *forever*
+    (funcall *curr-fn*)
+    (multiple-value-bind (_ ts-info)
+        (ts-info (function-name *curr-fn*))
+      (declare (ignore _))
+      (chat-now ts-info))
+    (sleep 60)))
 
 (defun run-control-heating ()
   (bt:make-thread #'control-heating))
