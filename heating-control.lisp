@@ -220,9 +220,10 @@ exec sbcl --script "$0" "$@"
   (setf *idle-at* (- (get-universal-time) (* 20 60)))
   (fetch-temperature)
   (while *forever*
-    (funcall *curr-fn*)
-    (chat-now (ts-info (function-name *curr-fn*)))
-    (sleep 60))
+    (ignore-errors
+     (funcall *curr-fn*)
+     (chat-now (ts-info (function-name *curr-fn*)))
+     (sleep 60)))
   (chat (ts-info :stop)))
 
 (defun run-control-heating ()
