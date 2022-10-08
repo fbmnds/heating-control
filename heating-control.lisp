@@ -56,7 +56,7 @@ exec sbcl --script "$0" "$@"
 (defparameter *idle-duration* (* 10 60))
 (defparameter *heating-duration* (* 5 60))
 (defparameter *heating-pause-duration* (* 5 60))
-(defparameter *state-duration* (* 6 60 60))
+(defparameter *state-duration* (* 12 60 60))
 
 (defvar *curr-fn*)
 
@@ -84,7 +84,7 @@ exec sbcl --script "$0" "$@"
 			       (:hour 2) ":" (:min 2) ":" (:sec 2))))))
     (values
      (format nil
-	     "~%~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)
+	     "~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)
      ts)))
 
 (defun chat (text)
@@ -110,6 +110,7 @@ exec sbcl --script "$0" "$@"
       *db* (concatenate 'string "insert into heating (ts,temp,hum,state)"
                         " values (?,round(?,2),round(?,2),?)")
       ts *temperature* *humidity* (format nil "~a" kw)))
+    (terpri)
     (princ ts-info)
     (unless (eql kw :idle) (chat ts-info))))
 
@@ -225,7 +226,7 @@ exec sbcl --script "$0" "$@"
   (chat (ts-info :stop)))
 
 (defun run-control-heating ()
-  (bt:make-thread #'control-heating))
+  (bt:make-thread #'control-heating :name "control-heating"))
 
 (run-control-heating)
 
