@@ -111,6 +111,7 @@ exec sbcl --script "$0" "$@"
       ts *temperature* *humidity* (format nil "~a" kw)))
     (terpri)
     (princ ts-info)
+    (chat ts-info t)
     (unless (eql kw :idle) (chat ts-info))))
 
 (defun round-2 (x) (when (numberp x) (float (/ (round (* 100 x)) 100))))
