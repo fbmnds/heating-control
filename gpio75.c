@@ -27,3 +27,5 @@ int main (int argc, char** argv) {
 
 // g++ -fpermissive -Wno-write-strings -o /usr/local/bin/gpio75 /usr/local/bin/gpio75.c
 // chmod u+s /usr/local/bin/gpio75.c
+
+// root crontab: @reboot /usr/local/bin/gpio75
