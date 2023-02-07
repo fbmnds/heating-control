@@ -4,7 +4,10 @@
 #     https://www.atlassian.com/git/tutorials/saving-changes/gitignore
 
 secrets/
+<<<<<<< HEAD
 data/
+=======
+>>>>>>> bdf89d7 (Backup of a64)
 *~
 *.lafsl
 
