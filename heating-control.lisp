@@ -11,21 +11,23 @@ exec sbcl --script "$0" "$@"
   (when (probe-file quicklisp-init)
     (load quicklisp-init)))
 
-;;(ql:quickload :dexador)
+(ql:quickload :dexador)
 (ql:quickload :uiop)
 (ql:quickload :parse-float)
 (ql:quickload :cl-json)
 (ql:quickload :bt-semaphore)
 (ql:quickload :local-time)
 (ql:quickload :sqlite)
+(ql:quickload :named-readtables)
 (ql:quickload :slynk)
 
 (use-package '(:parse-float :sqlite))
 
 (defmacro str+ (&rest rest) `(concatenate 'string ,@rest))
 
-(defparameter *path* (str+ (uiop:getenv :home) "/projects/heating-control/"))
-
+(defparameter *path* (str+ (uiop:getenv "HOME") "/projects/heating-control/"))
+(load (str+ *path* "secrets/secrets.lisp"))
+#| Pi Zero Parameter
 (defparameter *heating-gpio-pin* 21)
 (defparameter *cmd-on*
   (format nil
@@ -36,13 +38,16 @@ exec sbcl --script "$0" "$@"
 (defparameter *cmd-state*
   (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
 
-(defvar *cmd* (make-hash-table))
-(setf (gethash :temperature *cmd*)
-      (list "/usr/bin/python3" (str+ *path* "temperature.py")))
-(setf (gethash :toggle *cmd*)
-      '("/usr/bin/curl" "http://192.168.178.70/r1"))
-(setf (gethash :state *cmd*)
-      '("/usr/bin/curl" "http://192.168.178.70/?"))
+(defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))
+|#
+
+(defparameter *heating-gpio-pin* 75)
+(defparameter *cmd-on* (format nil "/usr/local/bin/gpio~a 1" *heating-gpio-pin*))
+(defparameter *cmd-off* (format nil "/usr/local/bin/gpio~a 0" *heating-gpio-pin*))
+(defparameter *cmd-state*
+  (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
+(defparameter *cmd-th* (list "/usr/local/bin/dht22" ""))
+
 
 (defparameter *min-temp* 10)
 (defparameter *max-temp* 11.2)
@@ -55,10 +60,12 @@ exec sbcl --script "$0" "$@"
 (defparameter *idle-at* nil)
 (defparameter *heating-resumed-at* nil)
 (defparameter *heating-paused-at* nil)
+(defparameter *state-at* nil)
 
 (defparameter *idle-duration* (* 10 60))
 (defparameter *heating-duration* (* 5 60))
 (defparameter *heating-pause-duration* (* 5 60))
+(defparameter *state-duration* (* 6 60 60))
 
 (defvar *curr-fn*)
 
@@ -74,73 +81,70 @@ exec sbcl --script "$0" "$@"
                                           hum float null
                                           state text null)"))
 
-;;(defparameter *slynk-port* 4006)
-
+(defparameter *slynk-port* 4006)
 ;;(slynk:create-server :port *slynk-port*  :dont-close t)
-(setf slynk:*use-dedicated-output-stream* nil) 
+;;(setf slynk:*use-dedicated-output-stream* nil) 
+
+(defun ts-info (kw)
+  (let ((ts (format nil "~a"
+		    (local-time:format-timestring
+		     nil (local-time:now)
+		     :format '(:year "-" (:month 2) "-" (:day 2) " "
+			       (:hour 2) ":" (:min 2) ":" (:sec 2))))))
+    (values
+     (format nil
+	     "~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)
+     ts)))
+
+(defun chat (text &optional local)
+  (ignore-errors
+    (let ((host
+           (if local
+               *server*
+             (format nil
+                     "https://api.telegram.org/bot~a/sendMessage?chat_id=~a"
+                     *bot-token* *chat-id*))))
+      (dex:request host
+                   :method :post
+                   :headers '(("Content-Type" . "application/json"))
+                   :content (format nil "{\"text\": \"~a\"}" text)))))
+
+(defun chat-now (fn)
+  (let ((ts (get-universal-time)))
+    (unless *state-at* (setf *state-at* ts))
+    (when (> ts (+ *state-at* *state-duration*))
+      (setf *state-at* ts)
+      (chat (ts-info fn)))))
 
 (defun print-now (kw)
-  (let* ((ts (format nil "~a"
-		     (local-time:format-timestring
-		      nil (local-time:now)
-		      :format '(:year "-" (:month 2) "-" (:day 2) " "
-				(:hour 2) ":" (:min 2) ":" (:sec 2)))))
-	 (ts-info (format nil
-			  "~%~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)))
+  (multiple-value-bind (ts-info ts)
+      (ts-info kw)
     (ignore-errors
      (execute-non-query
       *db* (concatenate 'string "insert into heating (ts,temp,hum,state)"
-                                " values (?,round(?,2),round(?,2),?)")
+                        " values (?,round(?,2),round(?,2),?)")
       ts *temperature* *humidity* (format nil "~a" kw)))
-    (princ ts-info)))
+    (terpri)
+    (princ ts-info)
+    (chat ts-info t)
+    (unless (eql kw :idle) (chat ts-info))))
 
 (defun round-2 (x) (when (numberp x) (float (/ (round (* 100 x)) 100))))
 
 (defun fetch-temperature ()
-  (let ((th (ignore-errors
-	     (uiop:split-string (uiop:run-program (gethash :temperature *cmd*)
+  (ignore-errors
+   (let ((th (uiop:split-string (uiop:run-program *cmd-th* 
 						  :output '(:string :stripped t))
-				:separator " "))))
-    (setf *temperature* (round-2 (parse-float (car th) :junk-allowed t)))
-    (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t))))
+			        :separator " ")))
+     (setf *temperature* (round-2 (parse-float (car th) :junk-allowed t)))
+     (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t)))))
   (values *temperature* *humidity*))
 
-(defun heating-op-old (op)
-  (flet ((cmd () (uiop:run-program
-		  (gethash op *cmd*)
-		  :output '(:string :stripped t))))
-    (ignore-errors
-     (cdr (assoc :r-1
-		 (with-input-from-string (s (cmd))
-		   (json:decode-json s)))))))
-
-
-(defun heating-op (op)
-  (ignore-errors
-    (case op
-          (:on (uiop:run-program *cmd-on*)
-               (sleep 1)
-               (heating-op :state))
-          (:off (uiop:run-program *cmd-off*)
-                (sleep 1)
-                (heating-op :state))
-          (:state (parse-integer
-                   (uiop:run-program *cmd-state*
-                                     :output '(:string :stripped t))
-                   :junk-allowed t)))))
-
 (defun heating (mode)
-  (let ((state (heating-op :state)))
-    (case mode
-      (:on (when (and state (= 0 state))
-	     (setf state (heating-op :on))))
-      (:off (when (and state (= 1 state))
-	      (setf state (heating-op :off))))
-      (otherwise state))
-    (case state
-      (0 :off)
-      (1 :on)
-      (otherwise nil))))
+  (case mode
+      (:on (uiop:run-program *cmd-on*))
+      (:off (uiop:run-program *cmd-off*))
+      (otherwise (chat (format nil "Heating mode ~a unknown." mode)))))
 
 ;; *heating-needed* *heating-started* *heating-paused*
 ;;         T                T                 T         wait-to-resume
@@ -149,21 +153,24 @@ exec sbcl --script "$0" "$@"
 ;;        NIL               T                 .         stop-heating
 ;;        NIL              NIL                .         idle
 
+(declaim (ftype function idle))
+(declaim (ftype function heat-until-pause))
+
 (defun wait-to-resume ()
   ;;(print :wait-to-resume)
-  (let ((temperature (fetch-temperature)))
-    (cond ((not temperature) :ignore) 
-	  ((> temperature *max-temp*)
-	   (setf *heating-needed* nil)
-	   (setf *heating-started* nil)
-	   (setf *heating-paused* nil)
-	   (setf *curr-fn* #'idle))
-	  (t (let ((ts (get-universal-time)))
-	       (when (> ts (+ *heating-paused-at* *heating-pause-duration*))
-		 (heating :on)
-		 (print-now :heating-on)
-		 (setf *heating-resumed-at* ts)
-		 (setf *curr-fn* #'heat-until-pause)))))))
+  (fetch-temperature)
+  (cond ((not *temperature*) :ignore) 
+	 ((> *temperature* *max-temp*)
+	  (setf *heating-needed* nil)
+	  (setf *heating-started* nil)
+	  (setf *heating-paused* nil)
+	  (setf *curr-fn* #'idle))
+	 (t (let ((ts (get-universal-time)))
+	      (when (> ts (+ *heating-paused-at* *heating-pause-duration*))
+		(heating :on)
+		(print-now :heating-on)
+		(setf *heating-resumed-at* ts)
+		(setf *curr-fn* #'heat-until-pause))))))
 
 (defun heat-until-pause ()
   (let ((ts (get-universal-time)))
@@ -184,33 +191,44 @@ exec sbcl --script "$0" "$@"
   (let ((ts (get-universal-time)))
     (when (> ts (+ *idle-at* *idle-duration*))
       (setf *idle-at* ts)
-      (let ((tp (fetch-temperature)))
+      (fetch-temperature)
+      (let ((tp *temperature*))
 	(cond ((and tp (< tp *min-temp*))
 	       (setf *heating-needed* t)
-	       (setf *curr-fn* #'start-heating))
+	       (start-heating)
+               (return-from idle))
 	      ((and tp (> tp *max-temp*))
 	       (when *heating-needed*
-                  (setf *heating-needed* nil)
-                  (print-now :stop-heating))
+                 (setf *heating-needed* nil)
+                 (print-now :stop-heating))
                (heating :off))
 	      (t nil))
-      (print-now :idle)))))
+        (print-now :idle)))))
 
 (defmacro while (test &rest body)
   `(do ()
        ((not ,test))
      ,@body))
 
+#+sbcl
+(defun function-name (f)
+  (intern (cadr (uiop:split-string (format nil "~a" f))) "KEYWORD"))
+
 (defun control-heating ()
   (setf *curr-fn* #'idle)
   (setf *idle-at* (- (get-universal-time) (* 20 60)))
   (fetch-temperature)
-  (while *forever* (funcall *curr-fn*) (sleep 60)))
+  (while *forever*
+         (funcall *curr-fn*)
+         (chat-now (ts-info (function-name *curr-fn*)))
+         (sleep 60))
+  (chat (ts-info :stop)))
 
 (defun run-control-heating ()
   (bt:make-thread #'control-heating))
 
-(run-control-heating)
+;;(run-control-heating)
+
 
 
 
