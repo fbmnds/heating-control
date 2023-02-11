@@ -134,7 +134,7 @@ exec sbcl --script "$0" "$@"
 (defun round-2 (x) (when (numberp x) (float (/ (round (* 100 x)) 100))))
 
 (defun broadcast-temperature ()
-  (ignore-errors (dex:get "http://localhost:7700/broadcast"))
+  (ignore-errors (dex:get "http://localhost:7700/broadcast")))
 
 (defun fetch-temperature ()
   (ignore-errors
