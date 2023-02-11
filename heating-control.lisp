@@ -133,6 +133,9 @@ exec sbcl --script "$0" "$@"
 
 (defun round-2 (x) (when (numberp x) (float (/ (round (* 100 x)) 100))))
 
+(defun broadcast-temperature ()
+  (ignore-errors (dex:get "http://localhost:7700/broadcast"))
+
 (defun fetch-temperature ()
   (ignore-errors
    (let ((th (uiop:split-string (uiop:run-program *cmd-th* 
@@ -140,6 +143,7 @@ exec sbcl --script "$0" "$@"
 			        :separator " ")))
      (setf *temperature* (round-2 (parse-float (car th) :junk-allowed t)))
      (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t)))))
+  (broadcast-temperature)
   (values *temperature* *humidity*))
 
 (defun heating (mode)
