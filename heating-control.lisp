@@ -48,9 +48,10 @@ exec sbcl --script "$0" "$@"
   (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
 (defparameter *cmd-th* (list "/usr/local/bin/dht22" ""))
 
+(defparameter *chat* nil)
 
 (defparameter *min-temp* 10)
-(defparameter *max-temp* 11.2)
+(defparameter *max-temp* 10.5)
 
 (defparameter *forever* t)
 (defparameter *heating-needed* nil)
@@ -97,17 +98,18 @@ exec sbcl --script "$0" "$@"
      ts)))
 
 (defun chat (text &optional local)
-  (ignore-errors
-    (let ((host
-           (if local
-               *server*
-             (format nil
-                     "https://api.telegram.org/bot~a/sendMessage?chat_id=~a"
-                     *bot-token* *chat-id*))))
-      (dex:request host
-                   :method :post
-                   :headers '(("Content-Type" . "application/json"))
-                   :content (format nil "{\"text\": \"~a\"}" text)))))
+  (when *chat*
+    (ignore-errors
+      (let ((host
+             (if local
+                 *server*
+               (format nil
+                       "https://api.telegram.org/bot~a/sendMessage?chat_id=~a"
+                       *bot-token* *chat-id*))))
+        (dex:request host
+                     :method :post
+                     :headers '(("Content-Type" . "application/json"))
+                     :content (format nil "{\"text\": \"~a\"}" text))))))
 
 (defun chat-now (fn)
   (let ((ts (get-universal-time)))
