@@ -27,8 +27,6 @@ exec sbcl --script "$0" "$@"
                     (#:ws #:websocket-driver)
                     (#:wsd #:websocket-driver-client)
                     (#:bt #:bordeaux-threads)
-                    (#:lp #:lparallel)
-                    (#:lpq #:lparallel.queue)
                     (#:ws #:websocket-driver)
                     (#:wsd #:websocket-driver-client))
   (:export #:run-heating-control
@@ -172,7 +170,7 @@ exec sbcl --script "$0" "$@"
 
 (defun broadcast-data ()
   (handler-case
-      (let ((data (uiop:run-program (select-data n) :force-shell t
+      (let ((data (uiop:run-program (select-data) :force-shell t
                                     :output '(:string :stripped t))))
         (loop for url in *control-ui-backend*
               do (send-data data url)))
