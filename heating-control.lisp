@@ -3,8 +3,6 @@
 exec sbcl --script "$0" "$@"
 |#
 
-
-;;#-quicklisp
 #-quicklisp
 (let ((quicklisp-init (merge-pathnames "quicklisp/setup.lisp"
                                        (user-homedir-pathname))))
@@ -20,36 +18,54 @@ exec sbcl --script "$0" "$@"
 (ql:quickload :sqlite)
 (ql:quickload :named-readtables)
 (ql:quickload :slynk)
+(ql:quickload '(:websocket-driver :websocket-driver-client))
 
-(use-package '(:parse-float :sqlite))
+
+(defpackage :heating-control
+  (:use :cl :parse-float :sqlite)
+  (:local-nicknames (#:lt #:local-time)
+                    (#:ws #:websocket-driver)
+                    (#:wsd #:websocket-driver-client)
+                    (#:bt #:bordeaux-threads)
+                    (#:lp #:lparallel)
+                    (#:lpq #:lparallel.queue)
+                    (#:ws #:websocket-driver)
+                    (#:wsd #:websocket-driver-client))
+  (:export #:run-heating-control
+           #:stop-heating-control))
+
+(in-package :heating-control)
 
 (defmacro str+ (&rest rest) `(concatenate 'string ,@rest))
 
+
 (defparameter *path* (str+ (uiop:getenv "HOME") "/projects/heating-control/"))
 (load (str+ *path* "secrets/secrets.lisp"))
-#| Pi Zero Parameter
-(defparameter *heating-gpio-pin* 21)
-(defparameter *cmd-on*
-  (format nil
-          "/usr/bin/echo 1 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
-(defparameter *cmd-off*
-  (format nil
-          "/usr/bin/echo 0 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
-(defparameter *cmd-state*
-  (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
 
-(defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))
-|#
+(defparameter *host* (uiop:hostname))
 
-(defparameter *heating-gpio-pin* 75)
-(defparameter *cmd-on* (format nil "/usr/local/bin/gpio~a 1" *heating-gpio-pin*))
-(defparameter *cmd-off* (format nil "/usr/local/bin/gpio~a 0" *heating-gpio-pin*))
-(defparameter *cmd-state*
+(defparameter *control-thread* nil)
+
+(defparameter *heating-gpio-pin* 21)      
+(defparameter *cmd-on*                    
+  (format nil "/usr/bin/echo 1 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))   
+(defparameter *cmd-off*                   
+  (format nil "/usr/bin/echo 0 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))   
+(defparameter *cmd-state*                 
   (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
-(defparameter *cmd-th* (list "/usr/local/bin/dht22" ""))
+(defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))   
+
+(when (equal *host* "a64.fritz.box")
+  (setf *heating-gpio-pin* 75)
+  (setf *cmd-on* (format nil "/usr/local/bin/gpio~a 1" *heating-gpio-pin*))
+  (setf *cmd-off* (format nil "/usr/local/bin/gpio~a 0" *heating-gpio-pin*))
+  (setf *cmd-state*
+        (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
+  (setf *cmd-th* (list "/usr/local/bin/dht22" "")))
 
 (defparameter *chat* nil)
-(defparameter *broadcast-url* "http://localhost:7700/broadcast")
+(defparameter *control-ui-backend* (list "192.168.178.6"))
+(defparameter *control-ui-n* 200)
 
 (defparameter *min-temp* 10)
 (defparameter *max-temp* 10.5)
@@ -134,8 +150,33 @@ exec sbcl --script "$0" "$@"
 
 (defun round-2 (x) (when (numberp x) (float (/ (round (* 100 x)) 100))))
 
-(defun broadcast-temperature ()
-  (ignore-errors (dex:get *broadcast-url*)))
+(defun select-data (&optional (n *control-ui-n*))
+  (str+ "sqlite3 -json "
+        " ~/projects/heating-control/data/heating.db"
+        " 'select * from heating "
+        " where not temp is null and not hum is null "
+        " order by ts "
+        (format nil " desc limit ~a;'" n)))
+
+(defun send-data(data url)
+  (let* ((url (str+ "ws://" url ":7700/"))
+         (client (wsd:make-client url)))
+    (progn
+      ;;(print data)
+      ;;(ws:on :open client (lambda () (format t "~&connected~%")))
+      (ws:start-connection client)
+      (ws:on :message client (lambda (message) (format t "~a" message)))
+      (ws:send client data)
+      (sleep 1))
+    (ws:close-connection client)))
+
+(defun broadcast-data ()
+  (handler-case
+      (let ((data (uiop:run-program (select-data n) :force-shell t
+                                    :output '(:string :stripped t))))
+        (loop for url in *control-ui-backend*
+              do (send-data data url)))
+    (condition (c) (format t "broadcast error: ~a" c))))
 
 (defun fetch-temperature ()
   (ignore-errors
@@ -144,7 +185,7 @@ exec sbcl --script "$0" "$@"
 			        :separator " ")))
      (setf *temperature* (round-2 (parse-float (car th) :junk-allowed t)))
      (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t)))))
-  (broadcast-temperature)
+  (broadcast-data)
   (values *temperature* *humidity*))
 
 (defun heating (mode)
@@ -232,9 +273,13 @@ exec sbcl --script "$0" "$@"
   (chat (ts-info :stop)))
 
 (defun run-control-heating ()
-  (bt:make-thread #'control-heating))
+  (setf *control-thread* (bt:make-thread #'control-heating)))
+
+(defun stop-control-heating ()
+  (bt:destroy-thread *control-thread*))
 
 ;;(run-control-heating)
+
 
 
 
