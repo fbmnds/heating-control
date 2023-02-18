@@ -127,7 +127,7 @@ exec sbcl --script "$0" "$@"
                                     :output '(:string :stripped t))))
         (loop for url in *control-ui-backend*
               do (send-data data url)))
-    (condition (c) (format t "broadcast error: ~a" c))))
+    (condition (c) (format t "~%broadcast error: ~a" c))))
 
 (defun ts-info (kw)
   (let ((ts (format nil "~a"
