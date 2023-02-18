@@ -44,14 +44,14 @@ exec sbcl --script "$0" "$@"
 
 (defparameter *control-thread* nil)
 
-(defparameter *heating-gpio-pin* 21)      
-(defparameter *cmd-on*                    
-  (format nil "/usr/bin/echo 1 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))   
-(defparameter *cmd-off*                   
-  (format nil "/usr/bin/echo 0 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))   
-(defparameter *cmd-state*                 
+(defparameter *heating-gpio-pin* 21)
+(defparameter *cmd-on*
+  (format nil "/usr/bin/echo 1 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
+(defparameter *cmd-off*
+  (format nil "/usr/bin/echo 0 >/sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
+(defparameter *cmd-state*
   (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
-(defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))   
+(defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))
 
 (when (equal *host* "a64.fritz.box")
   (setf *heating-gpio-pin* 75)
@@ -91,25 +91,53 @@ exec sbcl --script "$0" "$@"
 (defparameter *db*
   (connect (merge-pathnames #p"data/heating.db" *path*)))
 (defvar *db-create* '(execute-non-query *db*
-		      "create table heating (id integer primary key, 
-                                          ts text not null, 
+                      "create table heating (id integer primary key,
+                                          ts text not null,
                                           temp float null,
                                           hum float null
                                           state text null)"))
 
 (defparameter *slynk-port* 4006)
 ;;(slynk:create-server :port *slynk-port*  :dont-close t)
-;;(setf slynk:*use-dedicated-output-stream* nil) 
+;;(setf slynk:*use-dedicated-output-stream* nil)
+
+(defun select-data (&optional (n *control-ui-n*))
+  (str+ "sqlite3 -json "
+        " ~/projects/heating-control/data/heating.db"
+        " 'select * from heating "
+        " where not temp is null and not hum is null "
+        " order by ts "
+        (format nil " desc limit ~a;'" n)))
+
+(defun send-data(data url)
+  (let* ((url (str+ "ws://" url ":7700/"))
+         (client (wsd:make-client url)))
+    (progn
+      ;;(print data)
+      ;;(ws:on :open client (lambda () (format t "~&connected~%")))
+      (ws:start-connection client)
+      (ws:on :message client (lambda (message) (format t "~a" message)))
+      (ws:send client data)
+      (sleep 1))
+    (ws:close-connection client)))
+
+(defun broadcast-data ()
+  (handler-case
+      (let ((data (uiop:run-program (select-data) :force-shell t
+                                    :output '(:string :stripped t))))
+        (loop for url in *control-ui-backend*
+              do (send-data data url)))
+    (condition (c) (format t "broadcast error: ~a" c))))
 
 (defun ts-info (kw)
   (let ((ts (format nil "~a"
-		    (local-time:format-timestring
-		     nil (local-time:now)
-		     :format '(:year "-" (:month 2) "-" (:day 2) " "
-			       (:hour 2) ":" (:min 2) ":" (:sec 2))))))
+                    (local-time:format-timestring
+                     nil (local-time:now)
+                     :format '(:year "-" (:month 2) "-" (:day 2) " "
+                                     (:hour 2) ":" (:min 2) ":" (:sec 2))))))
     (values
      (format nil
-	     "~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)
+             "~a ~a*C ~a% ~a" ts *temperature* *humidity* kw)
      ts)))
 
 (defun chat (text &optional local)
@@ -143,47 +171,18 @@ exec sbcl --script "$0" "$@"
       ts *temperature* *humidity* (format nil "~a" kw)))
     (terpri)
     (princ ts-info)
-    (chat ts-info t)
+    (broadcast-data)
     (unless (eql kw :idle) (chat ts-info))))
 
 (defun round-2 (x) (when (numberp x) (float (/ (round (* 100 x)) 100))))
 
-(defun select-data (&optional (n *control-ui-n*))
-  (str+ "sqlite3 -json "
-        " ~/projects/heating-control/data/heating.db"
-        " 'select * from heating "
-        " where not temp is null and not hum is null "
-        " order by ts "
-        (format nil " desc limit ~a;'" n)))
-
-(defun send-data(data url)
-  (let* ((url (str+ "ws://" url ":7700/"))
-         (client (wsd:make-client url)))
-    (progn
-      ;;(print data)
-      ;;(ws:on :open client (lambda () (format t "~&connected~%")))
-      (ws:start-connection client)
-      (ws:on :message client (lambda (message) (format t "~a" message)))
-      (ws:send client data)
-      (sleep 1))
-    (ws:close-connection client)))
-
-(defun broadcast-data ()
-  (handler-case
-      (let ((data (uiop:run-program (select-data) :force-shell t
-                                    :output '(:string :stripped t))))
-        (loop for url in *control-ui-backend*
-              do (send-data data url)))
-    (condition (c) (format t "broadcast error: ~a" c))))
-
 (defun fetch-temperature ()
   (ignore-errors
-   (let ((th (uiop:split-string (uiop:run-program *cmd-th* 
-						  :output '(:string :stripped t))
-			        :separator " ")))
-     (setf *temperature* (round-2 (parse-float (car th) :junk-allowed t)))
-     (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t)))))
-  (broadcast-data)
+    (let ((th (uiop:split-string (uiop:run-program *cmd-th*
+                                                   :output '(:string :stripped t))
+                                 :separator " ")))
+      (setf *temperature* (round-2 (parse-float (car th) :junk-allowed t)))
+      (setf *humidity* (round-2 (parse-float (cadr th) :junk-allowed t)))))
   (values *temperature* *humidity*))
 
 (defun heating (mode)
@@ -205,18 +204,18 @@ exec sbcl --script "$0" "$@"
 (defun wait-to-resume ()
   ;;(print :wait-to-resume)
   (fetch-temperature)
-  (cond ((not *temperature*) :ignore) 
-	 ((> *temperature* *max-temp*)
-	  (setf *heating-needed* nil)
-	  (setf *heating-started* nil)
-	  (setf *heating-paused* nil)
-	  (setf *curr-fn* #'idle))
-	 (t (let ((ts (get-universal-time)))
-	      (when (> ts (+ *heating-paused-at* *heating-pause-duration*))
-		(heating :on)
-		(print-now :heating-on)
-		(setf *heating-resumed-at* ts)
-		(setf *curr-fn* #'heat-until-pause))))))
+  (cond ((not *temperature*) :ignore)
+         ((> *temperature* *max-temp*)
+          (setf *heating-needed* nil)
+          (setf *heating-started* nil)
+          (setf *heating-paused* nil)
+          (setf *curr-fn* #'idle))
+         (t (let ((ts (get-universal-time)))
+              (when (> ts (+ *heating-paused-at* *heating-pause-duration*))
+                (heating :on)
+                (print-now :heating-on)
+                (setf *heating-resumed-at* ts)
+                (setf *curr-fn* #'heat-until-pause))))))
 
 (defun heat-until-pause ()
   (let ((ts (get-universal-time)))
@@ -239,16 +238,16 @@ exec sbcl --script "$0" "$@"
       (setf *idle-at* ts)
       (fetch-temperature)
       (let ((tp *temperature*))
-	(cond ((and tp (< tp *min-temp*))
-	       (setf *heating-needed* t)
-	       (start-heating)
+        (cond ((and tp (< tp *min-temp*))
+               (setf *heating-needed* t)
+               (start-heating)
                (return-from idle))
-	      ((and tp (> tp *max-temp*))
-	       (when *heating-needed*
+              ((and tp (> tp *max-temp*))
+               (when *heating-needed*
                  (setf *heating-needed* nil)
                  (print-now :stop-heating))
                (heating :off))
-	      (t nil))
+              (t nil))
         (print-now :idle)))))
 
 (defmacro while (test &rest body)
@@ -277,9 +276,3 @@ exec sbcl --script "$0" "$@"
   (bt:destroy-thread *control-thread*))
 
 ;;(run-control-heating)
-
-
-
-
-
-
