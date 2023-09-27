@@ -260,8 +260,15 @@ exec sbcl --script "$0" "$@"
      ,@body))
 
 #+sbcl
-(defun function-name (f)
-  (intern (cadr (uiop:split-string (format nil "~a" f))) "KEYWORD"))
+(let ((cache (make-hash-table :test #'equal)))
+  (defun function-name (f)
+    (multiple-value-bind (name found) (gethash f cache)
+      (if found
+          name
+          (setf (gethash f cache)
+                (format nil ":~a"
+                        (cadr (uiop:split-string
+                               (string-trim '(#\>) (format nil "~a" f))))))))))
 
 (defun control-heating ()
   (setf *curr-fn* #'idle)
