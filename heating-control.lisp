@@ -24,8 +24,6 @@ exec sbcl --script "$0" "$@"
 (defpackage :heating-control
   (:use :cl :parse-float :sqlite)
   (:local-nicknames (#:lt #:local-time)
-                    (#:ws #:websocket-driver)
-                    (#:wsd #:websocket-driver-client)
                     (#:bt #:bordeaux-threads)
                     (#:ws #:websocket-driver)
                     (#:wsd #:websocket-driver-client))
@@ -36,6 +34,10 @@ exec sbcl --script "$0" "$@"
 
 (defmacro str+ (&rest rest) `(concatenate 'string ,@rest))
 
+(defmacro with-timeout (timeout &body body)
+  `(let ((thread (bt:make-thread (lambda () ,@body))))
+     (handler-case (bt:with-timeout (,timeout) (bt:join-thread thread))
+       (bt:timeout () (bt:destroy-thread thread)))))
 
 (defparameter *path* (str+ (uiop:getenv "HOME") "/projects/heating-control/"))
 (load (str+ *path* "secrets/secrets.lisp"))
@@ -53,7 +55,7 @@ exec sbcl --script "$0" "$@"
   (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
 (defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))
 
-(when (equal *host* "a64.fritz.local")
+(when (string-equal *host* "a64" :start1 0 :end1 3)
   (setf *heating-gpio-pin* 75)
   (setf *cmd-on* (format nil "/usr/local/bin/gpio~a 1" *heating-gpio-pin*))
   (setf *cmd-off* (format nil "/usr/local/bin/gpio~a 0" *heating-gpio-pin*))
@@ -64,6 +66,7 @@ exec sbcl --script "$0" "$@"
 (defparameter *chat* nil)
 (defparameter *control-ui-backend* (list "192.168.178.6"))
 (defparameter *control-ui-n* 200)
+(defparameter *send-timeout* 15)
 
 (defparameter *min-temp* 10)
 (defparameter *max-temp* 10.5)
@@ -112,13 +115,14 @@ exec sbcl --script "$0" "$@"
 (defun send-data(data url)
   (let* ((url (str+ "ws://" url ":7700/"))
          (client (wsd:make-client url)))
-    (progn
-      ;;(print data)
-      ;;(ws:on :open client (lambda () (format t "~&connected~%")))
-      (ws:start-connection client)
-      (ws:on :message client (lambda (message) (format t "~a" message)))
-      (ws:send client data)
-      (sleep 1))
+    (with-timeout *send-timeout*
+      (ignore-errors
+        ;;(print data)
+        ;;(ws:on :open client (lambda () (format t "~&connected~%")))
+        (ws:start-connection client)
+        (ws:on :message client (lambda (message) (format t "~a" message)))
+        (ws:send client data)
+        (sleep 1)))
     (ws:close-connection client)))
 
 (defun broadcast-data ()
