@@ -53,7 +53,7 @@ exec sbcl --script "$0" "$@"
   (format nil "/usr/bin/cat /sys/class/gpio/gpio~a/value" *heating-gpio-pin*))
 (defparameter *cmd-th* (list "/usr/bin/python3" (str+ *path* "temperature.py")))
 
-(when (equal *host* "a64.fritz.box")
+(when (equal *host* "a64.fritz.local")
   (setf *heating-gpio-pin* 75)
   (setf *cmd-on* (format nil "/usr/local/bin/gpio~a 1" *heating-gpio-pin*))
   (setf *cmd-off* (format nil "/usr/local/bin/gpio~a 0" *heating-gpio-pin*))
