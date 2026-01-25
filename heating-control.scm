@@ -9,7 +9,9 @@
         (only srfi-19-io date->string)
         srfi-69
         nrepl srfi-18
-        srfi-12)
+        srfi-12
+        (only posix-utils get-shell-variable)
+        sqlite3)
 
 
 
@@ -25,6 +27,9 @@
 
 (define dht(foreign-lambda int "dht" (c-pointer float) (c-pointer float)))
 (define heat (foreign-lambda int "heat" int))
+
+(define *db* (open-database
+              (fmt #f (get-shell-variable "HOME") "/data/heating.db")))
 
 (define *temperature-gpio-pin* 17)
 (define *heating-gpio-pin* 18)
@@ -59,7 +64,16 @@
 
 (define *curr-fn* idle)
 
-  
+
+
+(define (try-catch body handler)
+  (call/cc
+    (lambda (k)
+      (parameterize ((current-exception-handler
+                      (lambda (ex)
+                        (k (handler ex)))))
+        (body)))))
+
 (define (num/2 i)
   (if (number? i)
       (if (< i 10) (fmt #f "0" i) (fmt #f i))
@@ -68,35 +82,46 @@
 (define (kw->string kw)
   (string-upcase (string-delete (char-set #\: #\#) (fmt #f kw))))
 
+(define (ts->string d)
+  (fmt #f
+       (num (date-year d)) "-"
+       (num/2 (date-month d)) "-"
+       (num/2 (date-day d)) " "
+       (num/2 (date-hour d)) ":"
+       (num/2 (date-minute d)) ":"
+       (num/2 (date-second d))))
+
 (define (ts-info kw)
-  (let ((d (current-date)))
+  (let* ((d (current-date))
+         (ts-str (ts->string d))
+         (kw-str (kw->string kw)))
     (values
      (fmt #f
-         (num (date-year d)) "-"
-         (num/2 (date-month d)) "-"
-         (num/2 (date-day d)) " "
-         (num/2 (date-hour d)) ":"
-         (num/2 (date-minute d)) ":"
-         (num/2 (date-second d)) " "
-         (if (number? *temperature*) (fix 1 *temperature*) "-.-") "*C "
-         (if (number? *humidity*) (fix 1 *humidity*) "-.-") "% "
-         (kw->string kw))
-     d)))
+          ts-str " "
+          (if (number? *temperature*) (fix 1 *temperature*) "-.-") "*C "
+          (if (number? *humidity*) (fix 1 *humidity*) "-.-") "% "
+          kw-str)
+     d ts-str kw-str)))
 
-(define (update-db)
-  ;; (execute *db* "insert ...
+(define (update-db ts-str kw-str)
+  (let ([sql (fmt #f "insert into heating (ts,temp,hum,state) values (\""
+                  ts-str "\",round(" *temperature* ",2),round(" *humidity* ",2),\""
+                  kw-str "\");")])
+    (execute *db* sql)))
+  ;;
   ;; database lookup:
   ;; (map-row (lambda (a b c d e) (list a b c d e))
   ;;          *db* "select * from heating limit 3;")
-  #t)
 
 (define (print-now kw)
   (let ((ts (current-date)))
-          (when (date>? ts (date-add-duration *state-at*
-                                              *state-duration*))
-            (set! *state-at* ts)
-            (update-db)
-            (let-values (((s _) (ts-info kw))) (print s)))))
+    (when (date>? ts (date-add-duration *state-at*
+                                        *state-duration*))
+      (set! *state-at* ts)
+      (let-values (((s _ ts-str kw-str) (ts-info kw)))
+        (update-db ts-str kw-str)
+        (print s)
+        (flush-output)))))
 
 (define (fetch-temperature)
   (let ([r 0])
@@ -197,7 +222,7 @@
            (flush-output)
            (sleep 60)))
   (control-heating-close)
-  (let-values (((s _) (ts-info #:stop))) (print s)))
+  (let-values (((s _ _ _) (ts-info #:stop))) (print s)))
 
 (define with-main-mutex
   (let ((main-mutex (make-mutex)))
@@ -218,13 +243,6 @@
                                 (with-main-mutex
                                  (lambda () (eval x)))))))))))
 
-(define (try-catch body handler)
-  (call/cc
-    (lambda (k)
-      (parameterize ((current-exception-handler
-                      (lambda (ex)
-                        (k (handler ex)))))
-        (body)))))
 
 (try-catch 
  (lambda () (with-main-mutex (control-heating)))
