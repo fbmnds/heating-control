@@ -13,6 +13,8 @@
 
 
 #>
+#define NDEBUG
+#include "dbg.h"
 #include "heating.h"
 <#
 
@@ -95,8 +97,6 @@
             (update-db)
             (let-values (((s _) (ts-info kw))) (print s)))))
 
-(define (run-shell-command cmd) (print (fmt #f cmd)))
-
 (define (fetch-temperature)
   (let ([r 0])
     (let-location
@@ -106,11 +106,9 @@
          (begin
            (set! *temperature* t)
            (set! *humidity* h)
-           (print "t = "
-                  (fmt #f (num t 10 1))
-                  " h = "
-                  (fmt #f (num h 10 1))))       
-         (print "fetch-temperature error " r))))
+           (print "t = " (fmt #f (num t 10 1))
+                  " h = " (fmt #f (num h 10 1))))
+         (fmt #t "DEBUG 'fetch-temperature' error " r "\n"))))
   (values *temperature* *humidity*))
 
 (define (heating mode)
@@ -198,7 +196,7 @@
            (flush-output)
            (sleep 60)))
   (control-heating-close)
-  (print (fmt #f (ts-info #:stop))))
+  (let-values (((s _) (ts-info #:stop))) (print s)))
 
 (define with-main-mutex
   (let ((main-mutex (make-mutex)))

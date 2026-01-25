@@ -38,7 +38,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <stdint.h>
 #include <errno.h>
 #include <unistd.h>
-
+#include "dbg.h"
 
 
 struct GPIO_pin dht_pin = {
@@ -66,13 +66,14 @@ int pin_init(int pin_index, int gpio, int val)
   GPIO_pin_t* pin = pins_in_use[pin_index];
   int err=0;
 
-  fprintf(stdout, "Try opening chip '%s' '%s' '%d'\n", pin->chipname, pin->linename, pin->lineoffset);
+  debug("Try opening chip '%s' '%s' '%d'",
+        pin->chipname, pin->linename, pin->lineoffset);
 
   // Re-use/open GPIO chip
   if (!pin->chip) {
     pin->chip = gpiod_chip_open_by_name(pin->chipname);
     if (!pin->chip) {
-      fprintf(stdout, "Open chip '%s' failed", pin->chipname);
+      debug("Open chip '%s' failed", pin->chipname);
       return ERROR_GPIOCHIP;
     }
   }
@@ -81,13 +82,13 @@ int pin_init(int pin_index, int gpio, int val)
   if (!pin->line) {
     pin->line = gpiod_chip_get_line(pin->chip, gpio);
     if (!pin->line) {
-      fprintf(stdout, "Cannot get line GPIO%d\n", gpio);
+      debug("Cannot get line GPIO%d", gpio);
       gpiod_chip_close(pin->chip);
       return ERROR_GPIOLINE;
     }
     err = gpiod_line_request_output(pin->line, pin->linename, val);
     if (err<0) {
-      fprintf(stdout, "Cannot reserve line GPIO%d\n", gpio);
+      debug("Cannot reserve line GPIO%d", gpio);
       gpiod_line_release(pin->line);
       gpiod_chip_close(pin->chip);
       return ERROR_GPIOLINE;
@@ -95,7 +96,7 @@ int pin_init(int pin_index, int gpio, int val)
   }
 
   pin->lineoffset = gpio;
-  fprintf(stdout, "OK opened chip '%x' '%x' '%d'\n", pin->chip, pin->line, pin->lineoffset);
+  debug("OK opened chip '%x' '%x' '%d'", pin->chip, pin->line, pin->lineoffset);
   return 0;
 }
 
@@ -104,10 +105,13 @@ void pin_close(int idx)
   // Release lines and chip
   gpiod_line_release(pins_in_use[idx]->line);
   gpiod_chip_close(pins_in_use[idx]->chip);
+  debug("Released line %x and chip %x of %d",
+        pins_in_use[idx]->line,
+        pins_in_use[idx]->chip,
+        pins_in_use[idx]->lineoffset);
+  pins_in_use[idx]->lineoffset = -1;
 }
 
-
-//#define DEBUG
 
 /** 
  * How long to spin, waiting for input.
@@ -142,7 +146,6 @@ int dht(float *humidity, float *temperature)
   if (!dht_pin.line) return ERROR_GPIOLINE;
 
 #define LINE dht_pin.line
-
 
  start:
   usleep(5000);
@@ -198,7 +201,7 @@ int dht(float *humidity, float *temperature)
   bit = 0;
   pulse = 2; /* Skip over initial bit */
   while (pulse < DHT_PULSES*2) {
-#ifdef DEBUG
+#ifdef NDEBUG
     printf( 
            "Bit: %2d Byte: %2d Low: %3d High: %3d -> %1d  = 0x%2x\n", 
            bit,
@@ -247,7 +250,7 @@ int dht(float *humidity, float *temperature)
   /* Check the checksum */
   if (bytes[4] != ((bytes[0] + bytes[1] + bytes[2] + bytes[3]) & 0xff)) {
     /* If debugging, keep outputs regardless of checksum validity */
-#ifndef DEBUG
+#ifndef NDEBUG
     *humidity = -1;
     *temperature = -1;
 #endif
@@ -275,11 +278,9 @@ int dht(float *humidity, float *temperature)
 int heat(int val)
 {
   // Open GPIO line for output
-  fprintf(stdout, "heating_pin %x %x %x\n",
-          heating_pin, heating_pin.chip, heating_pin.line);
+  debug("heating_pin %x %x %x", heating_pin, heating_pin.chip, heating_pin.line);
   if (gpiod_line_set_value(heating_pin.line, val) < 0) {
-    fprintf(stdout,"Failed to set line GPIO%d to %d\n",
-            heating_pin.lineoffset,val);
+    debug("Failed to set line GPIO%d to %d", heating_pin.lineoffset,val);
     return ERROR_GPIOLINE;
   }
   return 0;
