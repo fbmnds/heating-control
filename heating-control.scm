@@ -7,13 +7,15 @@
         srfi-19-date
         (only srfi-19-time make-time*)
         (only srfi-19-io date->string)
-        srfi-69)
+        srfi-69
+        nrepl srfi-18)
 
 
 
 #>
 #include "heating.h"
 <#
+
 
 (define pin_init (foreign-lambda int "pin_init" int int int))
 (define pin_close (foreign-lambda void "pin_close" int))
@@ -104,11 +106,20 @@
 (define (run-shell-command cmd) (print (fmt #f cmd)))
 
 (define (fetch-temperature)
-  ;;(run-shell-command "fetch-temperature")
-  (let ((d (current-date)))
-        (set! *temperature* (+ 10 (sin (date-minute d))))
-        (set! *humidity* (+ 50 (sin (date-second d))))
-         (values *temperature* *humidity*)))
+  (let ([r 0])
+    (let-location
+     ([t float] [h float])
+     (set! r (dht (location h) (location t)))
+     (if (zero? r)
+         (begin
+           (set! *temperature* t)
+           (set! *humidity* h)
+           (print "t = "
+                  (fmt #f (num t 10 1))
+                  " h = "
+                  (fmt #f (num h 10 1))))       
+         (print "fetch-temperature error " r))))
+  (values *temperature* *humidity*))
 
 (define (heating mode)
   (case mode
@@ -127,8 +138,9 @@
 	  (set! *curr-fn* idle)
           (print-now #:heating-off))
          (else (let ((ts (current-date)))
-                 (when (date>? ts (date-add-duration *heating-paused-at*
-                                                     *heating-pause-duration*))
+                 (when (date>? ts
+                               (date-add-duration *heating-paused-at*
+                                                  *heating-pause-duration*))
                    (heating #:on)
                    (print-now #:heating-resumed)
                    (set! *heating-resumed-at* ts)
@@ -180,18 +192,7 @@
     ;;(if (zero? r)
     (set! r (pin_init 1 18 0))          ;)
     r)
-  (heat 1)
-  (let-location
-   ([t float] [h float])
-   ;;(while (and (> tries 0)(< r 0))
-   (set! r (dht (location h) (location t)))
-   ;;       (set! tries (- tries 1)))
-   (if (zero? r)
-       (print "t = "
-              (fmt #f (num t 10 1))
-              " h = "
-              (fmt #f (num h 10 1)))
-       (print "errno " r))))
+  (heat 1))
 
 (define (control-heating-close)
   (pin_close 0)
@@ -208,7 +209,26 @@
          ;;(print (fmt #f (ts-info (function-name *curr-fn*))))
          (flush-output)
          (sleep 60))
-  (pin_close)
+  (control-heating-close)
   (print (fmt #f (ts-info #:stop))))
 
-(control-heating-init)
+(define with-main-mutex
+  (let ((main-mutex (make-mutex)))
+    (lambda (proc)
+      (dynamic-wind (lambda () (mutex-lock! main-mutex))
+                    proc
+                    (lambda () (mutex-unlock! main-mutex))))))
+
+(thread-start!
+ (lambda ()
+   (nrepl 1234
+          #:host "0.0.0.0"
+          #:spawn (lambda ()
+                    (thread-start!
+                     (lambda ()
+                       (nrepl-loop
+                        eval: (lambda (x)
+                                (with-main-mutex
+                                 (lambda () (eval x)))))))))))
+
+(with-main-mutex (control-heating))
