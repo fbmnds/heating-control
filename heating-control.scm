@@ -23,10 +23,13 @@
 (define dht(foreign-lambda int "dht" (c-pointer float) (c-pointer float)))
 (define heat (foreign-lambda int "heat" int))
 
+(define *temperature-gpio-pin* 17)
+(define *heating-gpio-pin* 18)
+
 (define (*cmd-on*) (heat 1))
 (define (*cmd-off*) (heat 0))
 
-(define *temperature* 999) ;; idle until reading first valid temperature value
+(define *temperature* 999) ;; IDLE until first valid temperature measurement
 (define *humidity* 999)
 
 (define *min-temp* 10)
@@ -37,15 +40,15 @@
 (define *heating-started* #f)
 (define *heating-paused* #f)
 
-(define *idle-at* #f)
-(define *heating-resumed-at* #f)
-(define *heating-paused-at* #f)
-(define *state-at* #f)
-
 (define *idle-duration* (make-time* #:seconds (* 10 60)))
 (define *heating-duration* (make-time* #:seconds (* 5 60)))
 (define *heating-pause-duration* (make-time* #:seconds (* 5 60)))
-(define *state-duration* (make-time* #:seconds (* 6 60 60)))
+(define *state-duration* (make-time* #:seconds (* 10 60)))
+
+(define *idle-at* (date-subtract-duration (current-date) *idle-duration*))
+(define *heating-resumed-at* #f)
+(define *heating-paused-at* #f)
+(define *state-at* (date-subtract-duration (current-date) *state-duration*))
 
 (define (idle) (lambda () #f))
 (define (heat-until-pause) (lambda () #f))
@@ -53,21 +56,6 @@
 
 (define *curr-fn* idle)
 
-(define *temperature-gpio-pin* 17)
-(define *heating-gpio-pin* 18)
-
-;; (let ((temperature-gpio (location (c-pointer)))
-;;       (heating-gpio (location (c-pointer))))
-;;   (define (gpio-init pin val))
-;;   (define (gpio-close pin))
-;;   (define (heating-init)
-;;     (set! temperature-gpio (gpio-init *temperature-gpio-pin* 1))
-;;     (set! heating-gpio (gpio-init *heating-gpio-pin* 0)))
-;;   (define (heating-close)
-;;     (gpio-close temperature-gpio)
-;;     (gpio-close heating-gpio))
-;;   (define (heating-on))
-;;   (define (heating-off)))
   
 (define (num/2 i)
   (if (number? i)
@@ -100,8 +88,12 @@
   #t)
 
 (define (print-now kw)
-  (update-db)
-  (let-values (((s _) (ts-info kw))) (print s)))
+  (let ((ts (current-date)))
+          (when (date>? ts (date-add-duration *state-at*
+                                              *state-duration*))
+            (set! *state-at* ts)
+            (update-db)
+            (let-values (((s _) (ts-info kw))) (print s)))))
 
 (define (run-shell-command cmd) (print (fmt #f cmd)))
 
@@ -188,27 +180,23 @@
 (define (control-heating-init)
   (let ((r 0))
     (set! r (pin_init 0 17 1))
-    (display r)
-    ;;(if (zero? r)
-    (set! r (pin_init 1 18 0))          ;)
-    r)
-  (heat 1))
+    (if (zero? r)
+        (set! r (pin_init 1 18 0)))
+    r))
 
 (define (control-heating-close)
   (pin_close 0)
   (pin_close 1))
 
 (define (control-heating)
-  (control-heating-init)
-  (set! *curr-fn* idle)
-  (set! *idle-at* (date-subtract-duration (current-date)
-                                          (make-time* #:seconds (* 12 60))))
-  (fetch-temperature)
-  (while *forever*
-         (*curr-fn*)
-         ;;(print (fmt #f (ts-info (function-name *curr-fn*))))
-         (flush-output)
-         (sleep 60))
+  (unless (> 0 (control-heating-init))
+    (set! *curr-fn* idle)
+    (while *forever*
+           (fetch-temperature)
+           (*curr-fn*)
+           (print-now (function-name *curr-fn*))
+           (flush-output)
+           (sleep 60)))
   (control-heating-close)
   (print (fmt #f (ts-info #:stop))))
 

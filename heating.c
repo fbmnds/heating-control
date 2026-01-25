@@ -142,12 +142,12 @@ int dht(float *humidity, float *temperature)
   if (!dht_pin.line) return ERROR_GPIOLINE;
 
 #define LINE dht_pin.line
-  
-  usleep(5000);
+
 
  start:
-  err = 0;
+  usleep(5000);
 
+  err = 0;
   *humidity = 0.0f;
   *temperature = 0.0f;
 
