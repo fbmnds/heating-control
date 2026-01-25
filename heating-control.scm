@@ -8,7 +8,8 @@
         (only srfi-19-time make-time*)
         (only srfi-19-io date->string)
         srfi-69
-        nrepl srfi-18)
+        nrepl srfi-18
+        srfi-12)
 
 
 
@@ -217,4 +218,14 @@
                                 (with-main-mutex
                                  (lambda () (eval x)))))))))))
 
-(with-main-mutex (control-heating))
+(define (try-catch body handler)
+  (call/cc
+    (lambda (k)
+      (parameterize ((current-exception-handler
+                      (lambda (ex)
+                        (k (handler ex)))))
+        (body)))))
+
+(try-catch 
+ (lambda () (with-main-mutex (control-heating)))
+ (lambda () #f))
