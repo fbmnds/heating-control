@@ -1,4 +1,5 @@
-(import (only (chicken string) string-split ->string)
+(import (chicken foreign)
+        (only (chicken string) string-split ->string)
         (only miscmacros while)
         fmt
         (only srfi-13 string-upcase string-delete)
@@ -9,12 +10,22 @@
         srfi-69)
 
 
-(define *heating-gpio-pin* 75)
-(define *cmd-on* (fmt #f "/usr/local/bin/gpio" *heating-gpio-pin* " 1"))
-(define *cmd-off* (fmt #f "/usr/local/bin/gpio" *heating-gpio-pin* " 0"))
 
-(define *temperature* #f)
-(define *humidity* #f)
+#>
+#include "heating.h"
+<#
+
+(define pin_init (foreign-lambda int "pin_init" int int int))
+(define pin_close (foreign-lambda void "pin_close" int))
+
+(define dht(foreign-lambda int "dht" (c-pointer float) (c-pointer float)))
+(define heat (foreign-lambda int "heat" int))
+
+(define (*cmd-on*) (heat 1))
+(define (*cmd-off*) (heat 0))
+
+(define *temperature* 999) ;; idle until reading first valid temperature value
+(define *humidity* 999)
 
 (define *min-temp* 10)
 (define *max-temp* 10.4)
@@ -40,7 +51,22 @@
 
 (define *curr-fn* idle)
 
+(define *temperature-gpio-pin* 17)
+(define *heating-gpio-pin* 18)
 
+;; (let ((temperature-gpio (location (c-pointer)))
+;;       (heating-gpio (location (c-pointer))))
+;;   (define (gpio-init pin val))
+;;   (define (gpio-close pin))
+;;   (define (heating-init)
+;;     (set! temperature-gpio (gpio-init *temperature-gpio-pin* 1))
+;;     (set! heating-gpio (gpio-init *heating-gpio-pin* 0)))
+;;   (define (heating-close)
+;;     (gpio-close temperature-gpio)
+;;     (gpio-close heating-gpio))
+;;   (define (heating-on))
+;;   (define (heating-off)))
+  
 (define (num/2 i)
   (if (number? i)
       (if (< i 10) (fmt #f "0" i) (fmt #f i))
@@ -65,7 +91,10 @@
      d)))
 
 (define (update-db)
-  ;;(print "update db")
+  ;; (execute *db* "insert ...
+  ;; database lookup:
+  ;; (map-row (lambda (a b c d e) (list a b c d e))
+  ;;          *db* "select * from heating limit 3;")
   #t)
 
 (define (print-now kw)
@@ -83,8 +112,8 @@
 
 (define (heating mode)
   (case mode
-    ((#:on) (run-shell-command *cmd-on*))
-    ((#:off) (run-shell-command *cmd-off*))))
+    ((#:on) (heat 1))
+    ((#:off) (heat 0))))
 
 (set! wait-to-resume
       (lambda ()
@@ -144,7 +173,32 @@
 (define (function-name fn)
   (cadr (string-split (string-upcase (->string fn)) "()")))
 
+(define (control-heating-init)
+  (let ((r 0))
+    (set! r (pin_init 0 17 1))
+    (display r)
+    ;;(if (zero? r)
+    (set! r (pin_init 1 18 0))          ;)
+    r)
+  (heat 1)
+  (let-location
+   ([t float] [h float])
+   ;;(while (and (> tries 0)(< r 0))
+   (set! r (dht (location h) (location t)))
+   ;;       (set! tries (- tries 1)))
+   (if (zero? r)
+       (print "t = "
+              (fmt #f (num t 10 1))
+              " h = "
+              (fmt #f (num h 10 1)))
+       (print "errno " r))))
+
+(define (control-heating-close)
+  (pin_close 0)
+  (pin_close 1))
+
 (define (control-heating)
+  (control-heating-init)
   (set! *curr-fn* idle)
   (set! *idle-at* (date-subtract-duration (current-date)
                                           (make-time* #:seconds (* 12 60))))
@@ -154,6 +208,7 @@
          ;;(print (fmt #f (ts-info (function-name *curr-fn*))))
          (flush-output)
          (sleep 60))
+  (pin_close)
   (print (fmt #f (ts-info #:stop))))
 
-(control-heating)
+(control-heating-init)
