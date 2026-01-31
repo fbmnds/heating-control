@@ -158,9 +158,9 @@ int dht(float *humidity, float *temperature)
   /* Signal sensor to output it's data. 
      Datasheet: LOW for ~500ms then HIGH for ~20ms */
   gpiod_line_set_direction_output(LINE,0);
-  usleep(550);
+  usleep(55);
   gpiod_line_set_value(LINE,1);
-  usleep(20);
+  usleep(3);
   /* Time the pulses coming in */
   gpiod_line_set_direction_input(LINE);
   /* Tiny delay to let pin stabilise as input pin and let voltage come up */

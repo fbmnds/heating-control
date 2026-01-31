@@ -229,19 +229,24 @@
                     proc
                     (lambda () (mutex-unlock! main-mutex))))))
 
-(thread-start!
- (lambda ()
-   (nrepl 1234
-          #:host "0.0.0.0"
-          #:spawn (lambda ()
-                    (thread-start!
-                     (lambda ()
-                       (nrepl-loop
-                        eval: (lambda (x)
-                                (with-main-mutex
-                                 (lambda () (eval x)))))))))))
+(define (run-repl)
+  (thread-start!
+   (lambda ()
+     (nrepl 1234
+            #:host "0.0.0.0"
+            #:spawn (lambda ()
+                      (thread-start!
+                       (lambda ()
+                         (nrepl-loop
+                          eval: (lambda (x)
+                                  (with-main-mutex
+                                   (lambda () (eval x))))))))))))
 
+(define (run-heating-repl)
+  (try-catch
+   (lambda ()
+     (run-repl)
+     (with-main-mutex (control-heating)))
+   (lambda () #f)))
 
-(try-catch 
- (lambda () (with-main-mutex (control-heating)))
- (lambda () #f))
+(control-heating)
