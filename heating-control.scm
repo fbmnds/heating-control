@@ -16,8 +16,6 @@
 
 
 #>
-#define NDEBUG
-#include "dbg.h"
 #include "heating.h"
 <#
 

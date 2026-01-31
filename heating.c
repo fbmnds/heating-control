@@ -34,11 +34,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 */
 #include "heating.h"
+#include "dbg.h"
+
 #include <stdio.h>
 #include <stdint.h>
 #include <errno.h>
 #include <unistd.h>
-#include "dbg.h"
 
 
 struct GPIO_pin dht_pin = {
@@ -201,7 +202,7 @@ int dht(float *humidity, float *temperature)
   bit = 0;
   pulse = 2; /* Skip over initial bit */
   while (pulse < DHT_PULSES*2) {
-#ifdef NDEBUG
+#ifdef DEBUG
     printf( 
            "Bit: %2d Byte: %2d Low: %3d High: %3d -> %1d  = 0x%2x\n", 
            bit,

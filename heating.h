@@ -2,8 +2,6 @@
 #define HEATING_H
 
 #include <gpiod.h>
-#include <stdio.h>
-#include <unistd.h>
 
 
 #define DHT_OK               0
